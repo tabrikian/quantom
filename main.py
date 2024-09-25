@@ -1,10 +1,16 @@
 from __future__ import annotations
+
+import math
+
 import numpy as np
+
+NUMQUBITS = None
 
 
 class Gate:
     def __init__(self, matrix: np.ndarray):
         self.matrix = matrix
+        # Matrix len must be power of 2
         self.size = round(np.log2(len(matrix)))
 
     @staticmethod
@@ -33,19 +39,17 @@ class Gate:
 
     @staticmethod
     def T() -> Gate:
-        return Gate(np.array([[1, 0], [0, np.exp(np.pi*1j/4)]], np.complex_))
+        return Gate(np.array([[1, 0], [0, np.exp(np.pi * 1j / 4)]], np.complex_))
 
-    @staticmethod
-    # for now using iterated squaring, need to verify with Yotam
-    def power_gates(U: Gate, n: int) -> tuple[Gate, ...]:
+    def exp_gates(U: Gate, n: int) -> list[Gate, ...]:
         powers_of_U = [U]
         for k in range(1, n):
             past_gate = powers_of_U[-1]
             new_gate = Gate(past_gate.matrix * past_gate.matrix)  # U**(2**k)
             powers_of_U.append(new_gate)
-        return tuple(powers_of_U)
+        return powers_of_U
 
-    @staticmethod
+    # @staticmethod
     def get_control_gate(U: Gate) -> Gate:
         n = pow(2, U.size)
         matrix = U.matrix
@@ -93,8 +97,10 @@ class QuantumComputer:
         # the qbit result is 0 in the state |i> if and only if i//qbit_option is even
         qbit_option = pow(2, self.num_of_qbits - qbit - 1)
 
-        state_if_got0 = np.array([self.state[i] if (i // qbit_option) % 2 == 0 else 0 for i in range(len(self.state))], np.complex_)
-        state_if_got1 = np.array([self.state[i] if (i // qbit_option) % 2 == 1 else 0 for i in range(len(self.state))], np.complex_)
+        state_if_got0 = np.array([self.state[i] if (i // qbit_option) % 2 == 0 else 0 for i in range(len(self.state))],
+                                 np.complex_)
+        state_if_got1 = np.array([self.state[i] if (i // qbit_option) % 2 == 1 else 0 for i in range(len(self.state))],
+                                 np.complex_)
 
         norm_state_if_got0 = np.linalg.norm(state_if_got0)
         norm_state_if_got1 = np.linalg.norm(state_if_got1)
@@ -120,7 +126,7 @@ class QuantumComputer:
 
         self.state = new_state
 
-    def apply_gate(self, gate: Gate, qbits: tuple[int, ...]) -> None:
+    def apply_gate(self, gate: Gate, qbits: list[int, ...]) -> None:
         permutation = list(range(self.num_of_qbits))
         swap_queue = []
         # set the wanted qbits to the first qbits in the computer
@@ -137,20 +143,79 @@ class QuantumComputer:
         for i, j in reversed(swap_queue):
             self.swap(i, j)
 
-    def apply_multiple_gates(self, gates: tuple[tuple[Gate, tuple[int, ...]], ...]) -> None:
+    def apply_multiple_gates(self, gates: list[tuple[Gate, list[int, ...]], ...]) -> None:
         big_gate = np.eye(1)
         qbits = []
         for gate, gate_qbits in gates:
             qbits += list(gate_qbits)
             big_gate = self.tensor_product_matrix(big_gate, gate.matrix)
-        self.apply_gate(Gate(big_gate), tuple(qbits))
+        self.apply_gate(Gate(big_gate), qbits)
 
     def __repr__(self):
         return "num of qbits: " + str(self.num_of_qbits) + ", state: " + str(self.state)
 
 
+def Phase_Estimation(QC: QuantumComputer, U: Gate):
+    print(QC)
+    # The first H gates can be done in parallel
+    # Are those the right Qubits?
+    t = QC.num_of_qbits - U.size
+    second_register = [t + i for i in range(QC.num_of_qbits - t)]
+    QC.apply_multiple_gates([(Gate.H(), [t - i - 1]) for i in range(t)])
+    # print([[t - i - 1] for i in range(t)])
+    # Apply Black Box
+    for i, G in enumerate(U.exp_gates(t)):
+        CG = G.get_control_gate()
+        QC.apply_gate(CG, [i] + second_register)
+
+    for i in range(t):
+        for j in range(i, 0, -1):
+            QC.apply_gate(Gate.invR(j + 1).get_control_gate(), [i - j, i])
+        QC.apply_gate(Gate.H(), [i])
+
+    # print(QC)
+    for i in range(t):
+        print(QC.measure(i))
+
+    # Measure everyone
+    return
+
+
+def main():
+    U = None  # Input here the unitary matrix induced by gate C
+    psi = None  # Input here the quantum state psi which is an eigenvector of U
+    r = None  # Input here the accuracy parameter
+
+    k = 1
+    U = Gate(np.array([[1, 0], [0, np.exp(2j * np.pi / pow(2, k))]], np.complex_))
+    psi = np.array([0, 1])
+    r = 2 ** 2
+    n = math.ceil(math.log2(r))
+    t = n + math.ceil(math.log2(2 + 2 * r))  # this needs to be calculated based on r, the first n are for accuracy, the rest are for good propability, maybe not needed
+    # print(t)
+    # t = n + 6
+    t = 2
+    global NUMQUBITS
+    NUMQUBITS = t + round(math.log2(len(psi)))  # This needs to be O(log(r)) + size of psi I think
+    QC = QuantumComputer(NUMQUBITS, psi)
+    print(QC.measure(0), QC.measure(1))
+    return
+    # print(QC)
+
+    Phase_Estimation(QC, U)
+    return
+
+
 if __name__ == "__main__":
-    cmp = QuantumComputer(3)
+    main()
+    """t = 3
+    for i in range(t):
+        for j in range(i, 0, -1):
+            print(i, j + 1, i - j)
+            # QC.apply_gate(Gate.invR(j + 1).get_control_gate(), [i - j, i])
+        print("H", i)
+        # QC.apply_gate(Gate.H(), [i])"""
+    """cmp = QuantumComputer(3)
     cmp.apply_multiple_gates(((Gate.Z(), (0,)), (Gate.H(), (1,))))
     print(cmp)
 
@@ -158,4 +223,4 @@ if __name__ == "__main__":
     cmp.apply_gate(Gate.Z(), (0,))
     print(cmp)
     cmp.apply_gate(Gate.H(), (1,))
-    print(cmp)
+    print(cmp)"""
