@@ -91,7 +91,7 @@ class QuantumComputer:
             num_of_init_state_qbits = round(np.log2(len(init_state)))
             self.state = np.zeros(pow(2, num_of_qbits - num_of_init_state_qbits), dtype=np.complex_)
             self.state[0] = 1
-            self.state = self.tensor_product_vector(self.state, init_state)
+            self.state = self.tensor_product_vector(init_state, self.state)
 
     def measure(self, qbit: int) -> int:
         # the qbit result is 0 in the state |i> if and only if i//qbit_option is even
@@ -155,54 +155,52 @@ class QuantumComputer:
         return "num of qbits: " + str(self.num_of_qbits) + ", state: " + str(self.state)
 
 
-def Phase_Estimation(QC: QuantumComputer, U: Gate):
-    print(QC)
-    # The first H gates can be done in parallel
-    # Are those the right Qubits?
+def Phase_Estimation(QC: QuantumComputer, U: Gate) -> list[int]:
     t = QC.num_of_qbits - U.size
     second_register = [t + i for i in range(QC.num_of_qbits - t)]
-    QC.apply_multiple_gates([(Gate.H(), [t - i - 1]) for i in range(t)])
-    # print([[t - i - 1] for i in range(t)])
+
+    # The first H gates can be done in parallel
+    QC.apply_multiple_gates([(Gate.H(), [i]) for i in range(t)])
+
     # Apply Black Box
     for i, G in enumerate(U.exp_gates(t)):
         CG = G.get_control_gate()
-        QC.apply_gate(CG, [i] + second_register)
+        QC.apply_gate(CG, [t-1-i] + second_register)
 
+    # Inverse QFT
     for i in range(t):
         for j in range(i, 0, -1):
             QC.apply_gate(Gate.invR(j + 1).get_control_gate(), [i - j, i])
         QC.apply_gate(Gate.H(), [i])
 
-    # print(QC)
-    for i in range(t):
-        print(QC.measure(i))
-
     # Measure everyone
-    return
+    result = [QC.measure(i) for i in range(t)]
+    result.reverse()
+    return result
 
 
 def main():
     U = None  # Input here the unitary matrix induced by gate C
     psi = None  # Input here the quantum state psi which is an eigenvector of U
     r = None  # Input here the accuracy parameter
+    # t = math.ceil(math.log2(r))
 
-    k = 1
+    k = 5
     U = Gate(np.array([[1, 0], [0, np.exp(2j * np.pi / pow(2, k))]], np.complex_))
     psi = np.array([0, 1])
-    r = 2 ** 2
-    n = math.ceil(math.log2(r))
-    t = n + math.ceil(math.log2(2 + 2 * r))  # this needs to be calculated based on r, the first n are for accuracy, the rest are for good propability, maybe not needed
-    # print(t)
-    # t = n + 6
-    t = 2
-    global NUMQUBITS
-    NUMQUBITS = t + round(math.log2(len(psi)))  # This needs to be O(log(r)) + size of psi I think
-    QC = QuantumComputer(NUMQUBITS, psi)
-    print(QC.measure(0), QC.measure(1))
-    return
-    # print(QC)
+    r = 2 ** 4
+    t = math.ceil(math.log2(r))
 
-    Phase_Estimation(QC, U)
+    global NUMQUBITS
+    NUMQUBITS = t + round(math.log2(len(psi)))
+    results = {}
+    for _ in range(1000):
+        QC = QuantumComputer(NUMQUBITS, psi)
+        curr_result = tuple(Phase_Estimation(QC, U))
+        if curr_result not in results.keys():
+            results[curr_result] = 0
+        results[curr_result] += 1
+    print(results)
     return
 
 
